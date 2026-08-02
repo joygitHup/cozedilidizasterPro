@@ -70,17 +70,17 @@ const menuItems: MenuItem[] = [
     label: '生态治理工程',
     icon: TreePine,
     children: [
-      { label: '工程设计', href: '/ecology/design' },
+      { label: '工程设计', href: '/ecology/engineering' },
       { label: '治理进度', href: '/ecology/progress' },
-      { label: '效果评估', href: '/ecology/evaluation' },
+      { label: '效果评估', href: '/ecology/assessment' },
     ],
   },
   {
     label: '材料装备管理',
     icon: Package,
     children: [
-      { label: '材料库存', href: '/materials/inventory' },
-      { label: '装备运维', href: '/materials/maintenance' },
+      { label: '材料库存', href: '/equipment/inventory' },
+      { label: '装备运维', href: '/equipment/maintenance' },
     ],
   },
   {
@@ -88,22 +88,22 @@ const menuItems: MenuItem[] = [
     icon: Box,
     children: [
       { label: '模型管理', href: '/geology/models' },
-      { label: '剖面分析', href: '/geology/sections' },
+      { label: '剖面分析', href: '/geology/cross-section' },
     ],
   },
   {
     label: '巡查巡检',
     icon: ClipboardList,
     children: [
-      { label: '任务派发', href: '/patrol/tasks' },
-      { label: '巡查记录', href: '/patrol/records' },
+      { label: '任务派发', href: '/inspection/dispatch' },
+      { label: '巡查记录', href: '/inspection/records' },
     ],
   },
   {
     label: '统计分析',
     icon: BarChart3,
     children: [
-      { label: '灾害统计', href: '/statistics/disasters' },
+      { label: '灾害统计', href: '/statistics/disaster' },
       { label: '效能分析', href: '/statistics/performance' },
     ],
   },
