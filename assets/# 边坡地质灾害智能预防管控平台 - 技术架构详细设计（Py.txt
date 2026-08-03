@@ -1,0 +1,976 @@
+# 边坡地质灾害智能预防管控平台 - 技术架构详细设计（Python + Django 版本）
+
+> 本文档基于前期需求分析与平台功能设计，采用 **Python + Django + Django REST Framework (DRF)** 技术栈重新制定。保持微服务架构思路，充分发挥Python生态在AI、数据分析、GIS领域的优势。
+
+---
+
+## 一、总体技术架构（Python技术栈版）
+
+采用 **“端-边-云”协同 + Django微服务集群** 的混合架构，各服务间通过RESTful API + 消息队列通信。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                               应用层（展示与交互）                                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │  管理后台     │  │  移动端APP   │  │  三维可视化   │  │  大屏驾驶舱   │          │
+│  │  (Vue 3)      │  │  (Uni-app)   │  │  (Cesium)    │  │  (ECharts)   │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘          │
+│                                    │ HTTP / WebSocket                             │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                              API网关层 (Kong / Django REST Gateway)               │
+│                     路由转发 | 统一认证 | 限流熔断 | 日志审计                      │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                           Django 微服务集群（业务中台）                            │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+│  │认证服务   │ │台账服务   │ │监测服务   │ │预警服务   │ │应急服务   │ │治理服务   │  │
+│  │(Django)  │ │(Django)  │ │(FastAPI) │ │(Django)  │ │(Django)  │ │(FastAPI) │  │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+│       │             │             │             │             │             │      │
+├───────┼─────────────┼─────────────┼─────────────┼─────────────┼─────────────┤──────┤
+│       │             │             │  数据中台层  │             │             │      │
+│  ┌────▼─────────────▼─────────────▼─────────────▼─────────────▼─────────────▼───┐  │
+│  │                          数据存储与中间件集群                                   │  │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐              │  │
+│  │  │ PostgreSQL │  │  TDengine  │  │   Redis    │  │   MinIO    │              │  │
+│  │  │ + PostGIS  │  │  (时序库)  │  │  (缓存)    │  │  (对象存储)│              │  │
+│  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘              │  │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐                              │  │
+│  │  │RabbitMQ/   │  │Elasticsearch│  │  Celery    │                              │  │
+│  │  │Kafka(消息) │  │ (日志检索) │  │ (任务队列) │                              │  │
+│  │  └────────────┘  └────────────┘  └────────────┘                              │  │
+│  └───────────────────────────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                              边缘计算层 (Python Runtime + ONNX Runtime)            │
+│  ┌──────────────────────────────────────────────────────────────────────────────┐  │
+│  │  边缘网关 (ARM/NVIDIA Jetson) - 运行轻量级Django节点 + YOLOv8推理 + 本地预警  │  │
+│  │  数据缓存: ≥72小时   │  断网自主决策: 秒级响应                               │  │
+│  └──────────────────────────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                               感知层（前端监测设备）                                │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐  │
+│  │NPR锚索  │ │GNSS    │ │雨量计   │ │光纤光栅 │ │倾角仪   │ │摄像头   │ │无人机  │  │
+│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘ └────────┘ └────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 二、详细技术栈清单（Python体系）
+
+### 2.1 后端核心框架
+
+| 类别 | 技术选型 | 版本 | 说明 |
+|------|---------|------|------|
+| **Web框架** | Django | 4.2 LTS | 主框架，稳定性高，长期支持 |
+| **API框架** | Django REST Framework (DRF) | 3.14+ | RESTful API构建 |
+| **异步框架** | FastAPI | 0.100+ | 监测服务高频数据写入、AI推理服务 |
+| **ORM** | Django ORM + GeoDjango | 内置 | 支持PostGIS空间查询 |
+| **数据校验** | Django Serializers / Pydantic | - | DRF序列化器 / FastAPI Pydantic |
+| **API文档** | drf-spectacular / Swagger UI | - | 自动生成OpenAPI文档 |
+
+### 2.2 Python生态核心库
+
+```txt
+# requirements.txt 核心依赖
+
+# Django 核心
+Django==4.2.11
+djangorestframework==3.15.1
+django-cors-headers==4.3.1
+django-filter==23.5
+django-redis==5.4.0
+django-celery-beat==2.6.0
+django-ckeditor==6.7.0  # 富文本编辑
+
+# 数据库驱动
+psycopg2-binary==2.9.9        # PostgreSQL
+TDengine==3.2.0               # 时序数据库驱动
+redis==5.0.1
+
+# GIS 空间处理
+GeoDjango (内置)               # Django地理框架
+geopandas==0.14.1              # 空间数据分析
+shapely==2.0.2                 # 几何对象操作
+pyproj==3.6.1                  # 坐标投影转换
+folium==0.15.0                 # 地图可视化（后端生成）
+
+# AI / 机器学习
+torch==2.1.2                   # PyTorch深度学习
+torchvision==0.16.2            # 视觉模型
+numpy==1.26.4
+pandas==2.1.4
+scikit-learn==1.4.0            # 传统机器学习
+xgboost==2.0.3                 # 梯度提升树
+opencv-python==4.9.0.80        # 图像处理
+ultralytics==8.1.0             # YOLOv8 目标检测
+
+# 任务队列与异步
+celery==5.3.4                  # 异步任务队列
+django-celery-results==2.5.1
+kombu==5.3.5                   # 消息队列客户端
+
+# 工具库
+python-dotenv==1.0.1           # 环境变量管理
+requests==2.31.0
+django-debug-toolbar==4.2.0    # 开发调试
+django-extensions==3.2.3
+```
+
+### 2.3 前端技术栈（保持不变）
+
+| 类别 | 技术选型 | 说明 |
+|------|---------|------|
+| 管理后台 | Vue 3 + TypeScript + Element Plus | - |
+| 移动端 | Uni-app / Flutter | 一套代码多端运行 |
+| 三维GIS | Cesium + Three.js | 三维地质模型展示 |
+| 二维地图 | Mapbox GL / 高德地图API | 隐患点标绘、路线规划 |
+| 数据可视化 | ECharts 5 + D3.js | 监测曲线、热力图 |
+| WebSocket | Socket.io | 实时预警推送 |
+
+---
+
+## 三、微服务模块详细设计（Django服务）
+
+### 3.1 服务划分与职责
+
+| 服务名称 | 框架 | 端口 | 职责 | 数据库 |
+|---------|------|------|------|--------|
+| **认证服务** (auth) | Django + DRF | 8001 | 用户认证、权限管理、JWT签发 | PostgreSQL |
+| **台账服务** (hazard) | Django + DRF + GeoDjango | 8002 | 隐患点CRUD、风险斜坡管理、空间查询 | PostgreSQL+PostGIS |
+| **监测服务** (monitor) | FastAPI | 8003 | 设备数据接收、实时数据查询、历史数据聚合 | TDengine + Redis |
+| **预警服务** (warning) | Django + DRF | 8004 | 预警模型引擎、阈值研判、预警发布、闭环管理 | PostgreSQL + Redis |
+| **应急服务** (emergency) | Django + DRF | 8005 | 预案管理、避险转移、四张清单、物资调度 | PostgreSQL |
+| **治理服务** (govern) | FastAPI | 8006 | 工程设计、进度管理、生态评估 | PostgreSQL + MinIO |
+| **AI推理服务** (ai) | FastAPI | 8007 | YOLO识别、时序预测、模型推理 | - |
+
+### 3.2 核心服务项目结构
+
+```
+django_geohazard/
+├── docker-compose.yml
+├── requirements.txt
+├── .env
+│
+├── gateway/                           # API网关 (Kong / Django网关)
+│   └── config/
+│
+├── services/
+│   ├── auth_service/                  # 认证服务
+│   │   ├── manage.py
+│   │   ├── config/
+│   │   │   ├── settings.py
+│   │   │   ├── urls.py
+│   │   │   └── wsgi.py
+│   │   ├── apps/
+│   │   │   ├── users/                 # 用户管理
+│   │   │   │   ├── models.py
+│   │   │   │   ├── serializers.py
+│   │   │   │   ├── views.py
+│   │   │   │   └── permissions.py
+│   │   │   └── roles/                 # 角色权限
+│   │   └── requirements.txt
+│   │
+│   ├── hazard_service/                # 台账服务
+│   │   ├── manage.py
+│   │   ├── config/
+│   │   ├── apps/
+│   │   │   ├── hazard_points/         # 隐患点管理
+│   │   │   │   ├── models.py
+│   │   │   │   ├── serializers.py
+│   │   │   │   ├── views.py
+│   │   │   │   └── filters.py
+│   │   │   ├── risk_slopes/           # 风险斜坡管理
+│   │   │   ├── inspections/           # 排查任务
+│   │   │   └── geoservices/           # 空间分析服务
+│   │   └── requirements.txt
+│   │
+│   ├── warning_service/               # 预警服务（核心）
+│   │   ├── manage.py
+│   │   ├── config/
+│   │   ├── apps/
+│   │   │   ├── models/                # 数据模型
+│   │   │   │   ├── warning_record.py
+│   │   │   │   ├── trigger_rules.py
+│   │   │   │   └── call_log.py
+│   │   │   ├── engines/               # 预警引擎
+│   │   │   │   ├── rule_engine.py     # 规则引擎
+│   │   │   │   ├── ml_predictor.py    # 机器学习预测
+│   │   │   │   └── fusion_engine.py   # 多源融合
+│   │   │   ├── views/
+│   │   │   └── consumers/             # WebSocket消费者
+│   │   └── requirements.txt
+│   │
+│   └── emergency_service/             # 应急服务
+│       ├── manage.py
+│       ├── config/
+│       └── apps/
+│           ├── evacuation/            # 转移管理
+│           ├── shelters/              # 安置点管理
+│           └── materials/             # 物资管理
+│
+├── shared/                            # 共享库
+│   ├── common/                        # 公共工具
+│   │   ├── response.py                # 统一响应
+│   │   ├── exceptions.py              # 异常处理
+│   │   └── logger.py                  # 日志配置
+│   ├── django_apps/                   # 可复用的Django App
+│   │   ├── base_model/                # 基础模型
+│   │   └── utils/
+│   └── settings/                      # 公共配置
+│
+├── ai_services/                       # AI独立服务（FastAPI）
+│   ├── detection/                     # 目标检测
+│   │   ├── yolov8_model.py
+│   │   └── inference.py
+│   ├── forecast/                      # 时序预测
+│   │   ├── lstm_model.py
+│   │   └── predict.py
+│   └── models/                        # 模型存储
+│
+├── monitor_service/                   # 监测服务（FastAPI）
+│   ├── main.py
+│   ├── routers/
+│   │   ├── data_receiver.py           # 设备数据接收
+│   │   └── query.py                   # 数据查询
+│   └── tdengine_client.py
+│
+├── scripts/                           # 运维脚本
+│   ├── init_db.sql
+│   ├── migrate.sh
+│   └── deploy.sh
+│
+└── docs/                              # 项目文档
+    ├── API文档.md
+    └── 部署手册.md
+```
+
+---
+
+## 四、核心服务代码示例
+
+### 4.1 预警服务 - 核心数据模型 (warning_service/apps/models/warning_record.py)
+
+```python
+from django.db import models
+from django.contrib.postgres.fields import JSONField
+from shared.django_apps.base_model import BaseModel
+
+class WarningRecord(BaseModel):
+    """预警记录"""
+    class Level(models.TextChoices):
+        RED = 'red', '红色'
+        ORANGE = 'orange', '橙色'
+        YELLOW = 'yellow', '黄色'
+        BLUE = 'blue', '蓝色'
+    
+    class Status(models.TextChoices):
+        PENDING = 'pending', '待确认'
+        CONFIRMED = 'confirmed', '已确认'
+        ANALYZING = 'analyzing', '研判中'
+        PUBLISHED = 'published', '已发布'
+        PROCESSING = 'processing', '处置中'
+        CLOSED = 'closed', '已闭环'
+    
+    hazard_point = models.ForeignKey(
+        'hazard_service.HazardPoint', 
+        on_delete=models.CASCADE,
+        related_name='warnings'
+    )
+    level = models.CharField(max_length=10, choices=Level.choices)
+    trigger_type = models.CharField(max_length=50)  # 触发类型
+    trigger_value = models.JSONField(default=dict)  # 触发值详情
+    confidence = models.DecimalField(max_digits=5, decimal_places=2)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    
+    # 叫应信息
+    call_status = models.CharField(max_length=20, blank=True)
+    call_detail = models.JSONField(default=dict, blank=True)
+    
+    # 处置流程时间线
+    confirm_time = models.DateTimeField(null=True, blank=True)
+    confirm_user = models.CharField(max_length=50, blank=True)
+    publish_time = models.DateTimeField(null=True, blank=True)
+    close_time = models.DateTimeField(null=True, blank=True)
+    close_reason = models.CharField(max_length=200, blank=True)
+    
+    class Meta:
+        db_table = 'warning_record'
+        indexes = [
+            models.Index(fields=['status', 'level']),
+            models.Index(fields=['hazard_point']),
+            models.Index(fields=['-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.hazard_point.name} - {self.level} - {self.status}"
+```
+
+### 4.2 预警服务 - 序列化器 (warning_service/apps/serializers.py)
+
+```python
+from rest_framework import serializers
+from .models import WarningRecord
+
+class WarningRecordSerializer(serializers.ModelSerializer):
+    """预警记录序列化器"""
+    hazard_name = serializers.CharField(source='hazard_point.name', read_only=True)
+    hazard_code = serializers.CharField(source='hazard_point.code', read_only=True)
+    
+    class Meta:
+        model = WarningRecord
+        fields = [
+            'id', 'hazard_point', 'hazard_name', 'hazard_code',
+            'level', 'trigger_type', 'trigger_value', 'confidence',
+            'status', 'call_status', 'call_detail',
+            'confirm_time', 'confirm_user', 'publish_time',
+            'close_time', 'close_reason', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate(self, data):
+        """业务校验：红色预警必须关联应急转移方案"""
+        if data.get('level') == 'red':
+            if not data.get('hazard_point').evacuation_plan_exists:
+                raise serializers.ValidationError(
+                    "红色预警必须关联应急转移方案"
+                )
+        return data
+
+class WarningConfirmSerializer(serializers.Serializer):
+    """预警确认序列化器"""
+    warning_id = serializers.UUIDField()
+    confirm_user = serializers.CharField(max_length=50)
+    note = serializers.CharField(required=False, allow_blank=True)
+```
+
+### 4.3 预警服务 - 核心预警引擎 (warning_service/apps/engines/rule_engine.py)
+
+```python
+import logging
+from typing import Dict, Any
+from django.utils import timezone
+from django.db import transaction
+from .models import WarningRecord
+from .ml_predictor import MLPredictor
+from monitor_service.client import MonitorClient
+
+logger = logging.getLogger(__name__)
+
+class WarningEngine:
+    """预警引擎 - 核心业务逻辑"""
+    
+    def __init__(self):
+        self.monitor_client = MonitorClient()
+        self.ml_predictor = MLPredictor()
+    
+    def evaluate(self, hazard_point_id: str) -> Dict[str, Any]:
+        """
+        评估该隐患点是否触发预警
+        返回: {triggered: bool, level: str, confidence: float, reason: str}
+        """
+        # 1. 获取实时监测数据
+        latest_data = self.monitor_client.get_latest_data(hazard_point_id)
+        if not latest_data:
+            return {'triggered': False, 'reason': '无监测数据'}
+        
+        # 2. 规则引擎判断（快速阈值）
+        rule_result = self._check_thresholds(latest_data)
+        
+        # 3. 机器学习模型判断（深度分析）
+        ml_result = self.ml_predictor.predict(hazard_point_id, latest_data)
+        
+        # 4. 多源融合决策
+        result = self._fuse_results(rule_result, ml_result)
+        
+        # 5. 如果触发预警，保存记录
+        if result['triggered']:
+            self._create_warning_record(hazard_point_id, result)
+            # 触发叫应
+            self._trigger_call(result)
+        
+        return result
+    
+    def _check_thresholds(self, data: Dict) -> Dict:
+        """阈值规则检查"""
+        alerts = []
+        # 牛顿力突降检查
+        if data.get('npr_force') and data['npr_force']['change_rate'] > 30:
+            alerts.append({'type': 'npr_drop', 'level': 'red'})
+        # 降雨量检查
+        if data.get('rainfall', 0) > 50:  # 50mm/小时
+            alerts.append({'type': 'rainfall', 'level': 'orange'})
+        # 位移速率检查
+        if data.get('displacement_rate', 0) > 10:  # 10mm/天
+            alerts.append({'type': 'displacement', 'level': 'yellow'})
+        
+        return {
+            'triggered': len(alerts) > 0,
+            'level': max([a['level'] for a in alerts]) if alerts else None,
+            'reasons': alerts
+        }
+    
+    def _fuse_results(self, rule_result: Dict, ml_result: Dict) -> Dict:
+        """多源结果融合"""
+        # 规则触发 或 模型置信度>85% 则预警
+        if rule_result['triggered'] or ml_result.get('confidence', 0) > 0.85:
+            # 取最高等级
+            levels = []
+            if rule_result.get('level'):
+                levels.append(rule_result['level'])
+            if ml_result.get('level'):
+                levels.append(ml_result['level'])
+            
+            # 等级优先级: red > orange > yellow > blue
+            priority = {'red': 4, 'orange': 3, 'yellow': 2, 'blue': 1}
+            final_level = max(levels, key=lambda x: priority.get(x, 0))
+            
+            return {
+                'triggered': True,
+                'level': final_level,
+                'confidence': max(rule_result.get('confidence', 0.5), 
+                                 ml_result.get('confidence', 0.5)),
+                'reason': f"规则触发: {rule_result.get('reasons')} + 模型预测置信度{ml_result.get('confidence', 0)}"
+            }
+        return {'triggered': False}
+    
+    @transaction.atomic
+    def _create_warning_record(self, hazard_point_id: str, result: Dict):
+        """创建预警记录"""
+        record = WarningRecord.objects.create(
+            hazard_point_id=hazard_point_id,
+            level=result['level'],
+            trigger_type='auto',
+            trigger_value=result,
+            confidence=result['confidence'],
+            status=WarningRecord.Status.PENDING
+        )
+        logger.info(f"预警触发: {record.id} - {record.hazard_point.name}")
+        return record
+    
+    def _trigger_call(self, result: Dict):
+        """触发叫应（通过Celery异步执行）"""
+        from .tasks import send_alert_notification
+        send_alert_notification.delay(result)
+```
+
+### 4.4 监测服务 - FastAPI 数据接收 (monitor_service/main.py)
+
+```python
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import asyncpg
+import redis
+from datetime import datetime
+from pydantic import BaseModel
+
+app = FastAPI(title="监测数据服务", version="1.0.0")
+
+# 配置
+from config import TDENGINE_CONFIG, REDIS_CONFIG
+
+# 时序数据库连接
+tdengine_pool = None
+redis_client = redis.Redis(**REDIS_CONFIG)
+
+# 数据模型
+class MonitorDataPoint(BaseModel):
+    device_id: str
+    data_type: str  # force, displacement, rainfall, stress, strain
+    value: float
+    unit: str
+    timestamp: datetime
+
+@app.post("/api/monitor/data")
+async def receive_data(data: MonitorDataPoint):
+    """接收监测数据"""
+    # 1. 写入TDengine
+    await write_to_tdengine(data)
+    
+    # 2. 缓存最新值到Redis（供预警服务快速读取）
+    cache_key = f"latest:{data.device_id}:{data.data_type}"
+    redis_client.setex(cache_key, 300, f"{data.value}|{data.timestamp.isoformat()}")
+    
+    # 3. 检查是否触发预警（可异步触发）
+    # 触发预警引擎检查
+    
+    return {"status": "ok", "timestamp": data.timestamp}
+
+@app.get("/api/monitor/data/{device_id}")
+async def query_data(
+    device_id: str, 
+    data_type: str,
+    start_time: str,
+    end_time: str
+):
+    """查询监测数据"""
+    # 从TDengine查询
+    result = await query_tdengine(device_id, data_type, start_time, end_time)
+    return {"data": result}
+```
+
+### 4.5 Celery 异步任务配置
+
+```python
+# celery_config.py
+from celery import Celery
+from celery.schedules import crontab
+
+app = Celery('geohazard')
+app.config_from_object('django.conf:settings', namespace='CELERY')
+
+# 定时任务配置
+app.conf.beat_schedule = {
+    # 每5分钟检查一次预警
+    'check-warnings-every-5min': {
+        'task': 'warning_service.tasks.check_all_warnings',
+        'schedule': 300,  # 5分钟
+    },
+    # 每天凌晨2点清理过期缓存
+    'clean-cache-daily': {
+        'task': 'shared.tasks.clean_cache',
+        'schedule': crontab(hour=2, minute=0),
+    },
+    # 每10分钟检查设备在线状态
+    'check-device-health': {
+        'task': 'monitor_service.tasks.check_device_health',
+        'schedule': 600,
+    },
+}
+```
+
+---
+
+## 五、数据库配置（Django Settings）
+
+### 5.1 多数据库配置
+
+```python
+# settings.py
+DATABASES = {
+    # 主数据库 - PostgreSQL + PostGIS
+    'default': {
+        'ENGINE': 'django.contrib.gis.db.backends.postgis',
+        'NAME': 'geohazard',
+        'USER': 'geohazard_user',
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': '5432',
+        'OPTIONS': {
+            'sslmode': 'require',
+        },
+        'POOL_OPTIONS': {
+            'MAX_CONNECTIONS': 20,
+            'MIN_CONNECTIONS': 5,
+        }
+    },
+    # 缓存数据库
+    'redis': {
+        'ENGINE': 'django_redis.cache.RedisCache',
+        'LOCATION': f"redis://{os.getenv('REDIS_HOST')}:6379/1",
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}
+
+# 时序数据库连接（通过自定义客户端）
+TDENGINE_CONFIG = {
+    'host': os.getenv('TDENGINE_HOST', 'localhost'),
+    'port': 6041,
+    'user': 'root',
+    'password': os.getenv('TDENGINE_PASSWORD'),
+    'database': 'monitor_data',
+}
+```
+
+### 5.2 Django ORM 空间查询示例
+
+```python
+from django.contrib.gis.db import models
+from django.contrib.gis.geos import Point
+
+class HazardPoint(models.Model):
+    name = models.CharField(max_length=100)
+    location = models.PointField(srid=4326, geography=True)  # 地理坐标
+    level = models.CharField(max_length=10)
+    
+    def nearby_shelters(self, radius_km=5):
+        """查询周边5km内的安置点"""
+        from emergency_service.models import Shelter
+        return Shelter.objects.filter(
+            location__dwithin=(self.location, radius_km * 1000)
+        )
+```
+
+---
+
+## 六、服务间通信
+
+### 6.1 同步通信 - HTTP客户端封装
+
+```python
+# shared/common/service_client.py
+import httpx
+from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ServiceClient:
+    """微服务HTTP客户端"""
+    
+    SERVICE_MAP = {
+        'auth': 'http://auth-service:8001',
+        'hazard': 'http://hazard-service:8002',
+        'monitor': 'http://monitor-service:8003',
+        'warning': 'http://warning-service:8004',
+        'emergency': 'http://emergency-service:8005',
+        'govern': 'http://govern-service:8006',
+        'ai': 'http://ai-service:8007',
+    }
+    
+    def __init__(self, service_name: str):
+        self.base_url = self.SERVICE_MAP.get(service_name)
+        if not self.base_url:
+            raise ValueError(f"Unknown service: {service_name}")
+        self.client = httpx.Client(timeout=10.0)
+    
+    def get(self, path: str, params: Optional[dict] = None):
+        """GET请求"""
+        url = f"{self.base_url}{path}"
+        logger.debug(f"调用服务: {url}")
+        return self.client.get(url, params=params)
+    
+    def post(self, path: str, data: Optional[dict] = None):
+        """POST请求"""
+        url = f"{self.base_url}{path}"
+        return self.client.post(url, json=data)
+```
+
+### 6.2 异步通信 - Celery 任务定义
+
+```python
+# warning_service/tasks.py
+from celery import shared_task
+from shared.common.service_client import ServiceClient
+
+@shared_task
+def send_alert_notification(warning_data: dict):
+    """发送预警通知（异步）"""
+    # 1. 获取隐患点信息
+    hazard_client = ServiceClient('hazard')
+    hazard_info = hazard_client.get(f"/api/hazard/{warning_data['hazard_point_id']}")
+    
+    # 2. 获取应急联系人
+    emergency_client = ServiceClient('emergency')
+    contacts = emergency_client.get("/api/contacts", params={
+        'village': hazard_info['village']
+    })
+    
+    # 3. 发送短信/APP推送
+    from .notifiers import SMSNotifier, APPNotifier
+    for contact in contacts:
+        SMSNotifier.send(contact['phone'], warning_data)
+        APPNotifier.push(contact['user_id'], warning_data)
+    
+    # 4. 记录日志
+    logger.info(f"预警通知已发送: {warning_data['id']}")
+```
+
+---
+
+## 七、部署配置 (Docker Compose)
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # PostgreSQL + PostGIS
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: geohazard
+      POSTGRES_USER: geohazard_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geohazard_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # TDengine 时序数据库
+  tdengine:
+    image: tdengine/tdengine:3.2
+    environment:
+      TAOS_USER: root
+      TAOS_PASSWORD: ${TDENGINE_PASSWORD}
+    volumes:
+      - tdengine_data:/var/lib/taos
+    ports:
+      - "6041:6041"
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  # Django 认证服务
+  auth-service:
+    build:
+      context: ./services/auth_service
+      dockerfile: Dockerfile
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8001:8001"
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8001
+    volumes:
+      - ./services/auth_service:/app
+
+  # Django 台账服务
+  hazard-service:
+    build:
+      context: ./services/hazard_service
+      dockerfile: Dockerfile
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8002:8002"
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8002
+
+  # Django 预警服务（核心）
+  warning-service:
+    build:
+      context: ./services/warning_service
+      dockerfile: Dockerfile
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    ports:
+      - "8004:8004"
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8004
+
+  # FastAPI 监测服务
+  monitor-service:
+    build:
+      context: ./monitor_service
+      dockerfile: Dockerfile
+    depends_on:
+      tdengine:
+        condition: service_started
+      redis:
+        condition: service_started
+    ports:
+      - "8003:8003"
+    command: uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+
+  # Celery Worker（异步任务）
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.celery
+    command: celery -A celery_config worker -l INFO
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+
+  # Celery Beat（定时任务）
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.celery
+    command: celery -A celery_config beat -l INFO
+    depends_on:
+      rabbitmq:
+        condition: service_started
+
+  # MinIO 对象存储
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  # Nginx（静态文件 + 反向代理）
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./static:/static
+    depends_on:
+      - auth-service
+      - hazard-service
+      - warning-service
+
+volumes:
+  postgres_data:
+  tdengine_data:
+  minio_data:
+```
+
+---
+
+## 八、开发环境快速启动
+
+### 8.1 环境准备
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/your-org/django-geohazard.git
+cd django-geohazard
+
+# 2. 创建Python虚拟环境
+python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# 或 venv\Scripts\activate  # Windows
+
+# 3. 安装依赖
+pip install -r requirements.txt
+
+# 4. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，填写数据库密码等配置
+
+# 5. 启动Docker依赖服务
+docker-compose up -d postgres redis rabbitmq tdengine
+
+# 6. 执行数据库迁移
+python manage.py migrate
+
+# 7. 创建超级用户
+python manage.py createsuperuser
+
+# 8. 启动开发服务器
+python manage.py runserver 0.0.0.0:8000
+```
+
+### 8.2 开发工具推荐
+
+| 工具 | 用途 | 安装方式 |
+|------|------|---------|
+| PyCharm Professional | Django开发IDE | JetBrains官网 |
+| VS Code | 轻量级编辑器 | 微软官网 |
+| DBeaver | 数据库管理工具 | dbeaver.io |
+| Redis Insight | Redis可视化管理 | redis.com |
+| Postman | API调试工具 | postman.com |
+| Django Debug Toolbar | Django调试 | `pip install django-debug-toolbar` |
+
+---
+
+## 九、性能优化建议
+
+### 9.1 Django 层面
+
+| 优化手段 | 实现方式 | 预期效果 |
+|---------|---------|---------|
+| ORM查询优化 | 使用`select_related`、`prefetch_related`减少查询 | 减少N+1查询 |
+| 数据库索引 | 为高频查询字段建立索引 | 查询速度提升50%+ |
+| 缓存策略 | `django-redis`缓存高频查询结果 | 接口响应从200ms降至10ms |
+| 分页查询 | 使用`django.core.paginator` | 大数据量友好 |
+| 只读分离 | 配置数据库读写分离 | 提升并发处理能力 |
+
+### 9.2 监测数据写入优化
+
+```python
+# 使用批量写入TDengine
+def batch_write_to_tdengine(data_list: list):
+    """批量写入监测数据"""
+    # TDengine超级表 + 批量插入
+    sql = "INSERT INTO monitor_data VALUES "
+    values = []
+    for data in data_list:
+        values.append(f"({data['device_id']}, {data['value']}, '{data['timestamp']}')")
+    sql += ", ".join(values)
+    # 执行批量插入
+```
+
+### 9.3 预警服务性能优化
+
+```python
+# 使用Redis缓存模型预测结果
+def predict_with_cache(hazard_id: str, data: dict):
+    cache_key = f"predict:{hazard_id}:{hash(str(data))}"
+    result = redis_client.get(cache_key)
+    if result:
+        return json.loads(result)
+    
+    # 模型推理（耗时）
+    result = ml_model.predict(data)
+    redis_client.setex(cache_key, 60, json.dumps(result))  # 缓存60秒
+    return result
+```
+
+---
+
+## 十、团队分工与技能要求
+
+| 角色 | 人数 | 核心技能 | 职责 |
+|------|------|---------|------|
+| **Python架构师** | 1 | Django、微服务、Docker、K8s、PostGIS | 总体架构、技术选型、核心框架搭建 |
+| **Django后端开发** | 3-4 | Django、DRF、PostgreSQL、Celery | 台账、预警、应急等微服务开发 |
+| **FastAPI开发** | 1 | FastAPI、异步编程、TDengine | 监测服务、AI服务接口开发 |
+| **AI算法工程师** | 1-2 | PyTorch、YOLO、LSTM、ONNX | 预警模型训练、边缘端模型部署 |
+| **前端开发** | 2-3 | Vue3、Cesium、ECharts | 管理后台、大屏可视化 |
+| **移动端开发** | 1-2 | Uni-app / Flutter | 网格员巡查APP |
+| **DBA / DevOps** | 1 | PostgreSQL、Docker、CI/CD | 数据库管理、部署运维 |
+| **测试工程师** | 1-2 | Pytest、API自动化测试 | 单元测试、集成测试 |
+
+---
+
+## 总结
+
+这套 **Python + Django/DRF + FastAPI** 的技术方案具有以下核心优势：
+
+1. **开发效率高**：Django的ORM、Admin、认证系统开箱即用，大幅缩短开发周期
+2. **AI生态完善**：PyTorch、scikit-learn等与Django无缝集成，预警模型开发便捷
+3. **GIS支持强大**：GeoDjango + PostGIS组合，满足空间查询分析需求
+4. **微服务灵活**：Django负责复杂业务，FastAPI负责高性能I/O，各取所长
+5. **部署成熟**：Docker + K8s方案稳定可靠，支持弹性伸缩
+6. **团队易于招募**：Python/Django人才储备充足，降低招聘难度
+
+> **下一步行动建议**：
+> 1. 搭建开发环境，验证核心服务间通信
+> 2. 完成数据库表结构设计评审
+> 3. 开发预警引擎Demo，验证端到端流程
+> 4. 制定前端与后端的API契约文档
