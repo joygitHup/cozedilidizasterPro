@@ -1,0 +1,141 @@
+MQTT.fx 联调手册：标准格式 + 各设备厂商格式 + 预警模型
+============================================================
+
+前置
+----
+1) Broker: 127.0.0.1:1883   Client ID: mqttfx-sim-01
+2) 桥接: powershell -File scripts/start-iot.ps1
+3) Token: dev-mqtt-ingest-token
+4) Topic:
+     geo/telemetry/{设备编号}
+     geo/telemetry/{设备类型}/{设备编号}
+
+验收
+----
+  GET /api/monitoring/ingest/state/?device_code=XXX
+  GET /api/monitoring/ingest/logs/?trace_id=iot-xxxx
+  GET /api/monitoring/ingest/engine-threshold/?data_type=rainfall
+  Header: X-Ingest-Token: dev-mqtt-ingest-token
+
+
+一、通用标准格式（任意设备，推荐联调）
+------------------------------------
+字段固定：device_code + data_type + value + unit?
+data_type: force | displacement | rainfall | stress | strain | temperature
+GNSS/倾角合位移预警请带 channel=H（或不传；分轴用 E/N/U 或 X/Y）
+
+【雨量计 RAIN-001】Topic: geo/telemetry/RAIN-001
+{
+  "device_code": "RAIN-001",
+  "data_type": "rainfall",
+  "value": 65,
+  "unit": "mm",
+  "battery": 90,
+  "signal": "strong"
+}
+阈值(THRESH-DEFAULT): 黄30 / 橙50 / 红80
+专用模型: THRESH-RAIN → 黄20 / 橙40 / 红60
+
+【NPR锚索 NPR-001】Topic: geo/telemetry/NPR-001
+{
+  "device_code": "NPR-001",
+  "data_type": "force",
+  "value": 88.5,
+  "unit": "kN",
+  "battery": 85,
+  "signal": "strong"
+}
+阈值: force 黄50 / 橙70 / 红85；应力另发 data_type=stress
+专用模型: THRESH-NPR
+
+【光纤光栅 FIB-001】Topic: geo/telemetry/FIB-001
+{
+  "device_code": "FIB-001",
+  "data_type": "strain",
+  "value": 450,
+  "unit": "με",
+  "battery": 70,
+  "signal": "strong"
+}
+阈值: strain 黄200 / 橙400 / 红600
+专用模型: THRESH-FIBER（另可发 stress / temperature）
+
+【GNSS GNSS-001】Topic: geo/telemetry/GNSS-001
+{
+  "device_code": "GNSS-001",
+  "data_type": "displacement",
+  "channel": "H",
+  "value": 12,
+  "unit": "mm",
+  "battery": 95,
+  "signal": "strong"
+}
+阈值(DEFAULT): 黄5 / 橙10 / 红20；专用 THRESH-DISP: 黄3 / 橙8 / 红15
+说明: 仅 channel=H（或空）参与位移预警
+
+【摄像头 CAM-001】Topic: geo/telemetry/CAM-001
+{
+  "device_code": "CAM-001",
+  "data_type": "temperature",
+  "value": 48,
+  "unit": "℃",
+  "battery": 60,
+  "signal": "medium"
+}
+阈值(DEFAULT): 黄40 / 橙50 / 红60；专用 THRESH-TEMP: 黄35 / 橙45 / 红55
+
+【倾角仪 INC-001】Topic: geo/telemetry/INC-001
+{
+  "device_code": "INC-001",
+  "data_type": "displacement",
+  "channel": "H",
+  "value": 9,
+  "unit": "deg",
+  "battery": 88,
+  "signal": "strong"
+}
+阈值同位移；专用 THRESH-DISP
+
+
+二、厂商原始格式（适配器自动归一）
+--------------------------------
+【1】雨量 RAIN-001  Topic: geo/telemetry/rainfall/RAIN-001
+{"devId":"RAIN-001","rain_mm":65,"bat":90,"ts":1723545600,"rssi":-68}
+
+【2】NPR NPR-001  Topic: geo/telemetry/npr_anchor/NPR-001
+{"sn":"NPR-001","F":88.5,"stress":42,"batt":85,"signal":"strong"}
+
+【3】光纤 FIB-001  Topic: geo/telemetry/fiber_optic/FIB-001
+{"id":"FIB-001","strain":450,"stress":55,"temp":26.5,"bat":70}
+
+【4】GNSS GNSS-001  Topic: geo/telemetry/gnss/GNSS-001
+{"imei":"GNSS-001","dx":12,"dy":5,"dz":1,"battery":95}
+→ E/N/U 分轴 + H 合位移
+
+【5】摄像头 CAM-001  Topic: geo/telemetry/camera/CAM-001
+{"cam":"CAM-001","temp":48,"event":"motion","bat":60}
+
+【6】倾角 INC-001  Topic: geo/telemetry/inclinometer/INC-001
+{"code":"INC-001","tilt_x":1.2,"tilt_y":0.8,"battery":88}
+→ channel X/Y；若要预警请再用标准格式发 channel=H
+
+
+三、预警模型配置对照
+--------------------
+| 模型代码        | 适用设备              | 关键测点阈值(黄/橙/红)     | 默认启用 |
+|-----------------|-----------------------|-----------------------------|----------|
+| THRESH-DEFAULT  | 全类型                | 见上各 data_type            | 是       |
+| THRESH-RAIN     | RAIN-001              | rainfall 20/40/60           | 否       |
+| THRESH-NPR      | NPR-001               | force 50/70/85              | 否       |
+| THRESH-FIBER    | FIB-001               | strain 200/400/600          | 否       |
+| THRESH-DISP     | GNSS-001 / INC-001    | displacement 3/8/15         | 否       |
+| THRESH-TEMP     | CAM-001               | temperature 35/45/55        | 否       |
+
+切换专用模型（前端「预警模型」页一键启用，或 API）:
+  POST /api/warning/models/{id}/activate/  body: {"exclusive": true}
+
+查询引擎实际阈值:
+  GET /api/monitoring/ingest/engine-threshold/?data_type=rainfall
+
+
+建议顺序: 标准格式 RAIN → NPR → FIB → CAM → GNSS → INC；再分别 activate 专用模型复测超阈。

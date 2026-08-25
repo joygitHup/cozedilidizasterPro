@@ -1,0 +1,13 @@
+# 视频通道配置（与 MediaMTX path / ffmpeg 推流名对应）
+# 推流示例:
+#   ffmpeg -re -stream_loop -1 -i xxx.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/cam1
+
+cameras:
+  - id: cam1
+    code: CAM-V001
+    name: XX监测点主监控
+    location: XX县XX村
+    rtsp_path: cam1
+    device_code: "1234567890"
+    enabled: true
+    description: RTSP 推流至 MediaMTX

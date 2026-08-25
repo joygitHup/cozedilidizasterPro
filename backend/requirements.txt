@@ -1,0 +1,21 @@
+# Django 核心（兼容 Python 3.11+ / 3.13）
+Django>=4.2,<5.2
+djangorestframework>=3.14
+djangorestframework-simplejwt>=5.3
+django-cors-headers>=4.3
+django-filter>=23.5
+django-redis>=5.4
+python-dotenv>=1.0
+
+# 数据库：sqlite 开箱即用；Postgres / TDengine 见下方可选文件
+# psycopg[binary]>=3.1          → requirements-postgres.txt
+# taospy>=2.7                   → 本机已装 TDengine 客户端时 pip install taospy
+redis>=5.0
+
+# 工具
+requests>=2.31
+gunicorn>=21.2
+
+# IoT：Celery + MQTT 桥接
+celery>=5.3
+paho-mqtt>=2.0

@@ -1,60 +1,65 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-
-PORT=5000
-BACKEND_PORT=8000
 COZE_WORKSPACE_PATH="${COZE_WORKSPACE_PATH:-$(pwd)}"
-DEPLOY_RUN_PORT="${DEPLOY_RUN_PORT:-${PORT}}"
-
-
 cd "${COZE_WORKSPACE_PATH}"
 
-kill_port_if_listening() {
-    local port=$1
-    local pids
-    pids=$(ss -H -lntp 2>/dev/null | awk -v port="${port}" '$4 ~ ":"port"$"' | grep -o 'pid=[0-9]*' | cut -d= -f2 | paste -sd' ' - || true)
-    if [[ -z "${pids}" ]]; then
-      echo "Port ${port} is free."
-      return
-    fi
-    echo "Port ${port} in use by PIDs: ${pids} (SIGKILL)"
-    echo "${pids}" | xargs -I {} kill -9 {}
-    sleep 1
-    pids=$(ss -H -lntp 2>/dev/null | awk -v port="${port}" '$4 ~ ":"port"$"' | grep -o 'pid=[0-9]*' | cut -d= -f2 | paste -sd' ' - || true)
-    if [[ -n "${pids}" ]]; then
-      echo "Warning: port ${port} still busy after SIGKILL, PIDs: ${pids}"
-    else
-      echo "Port ${port} cleared."
-    fi
+# 加载 .env（若存在）
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
+PORT="${PORT:-5000}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:${BACKEND_PORT}}"
+
+PYTHON_BIN="python3"
+command -v python3 >/dev/null 2>&1 || PYTHON_BIN="python"
+
+find_port() {
+  local start=$1
+  "${PYTHON_BIN}" scripts/find_free_port.py --start "${start}"
 }
 
-echo "Clearing ports before start."
-kill_port_if_listening ${DEPLOY_RUN_PORT}
-kill_port_if_listening ${BACKEND_PORT}
+FRONTEND_PORT="$(find_port "${PORT}")"
+ACTUAL_BACKEND_PORT="$(find_port "${BACKEND_PORT}")"
 
-# 安装后端依赖
+if [[ "${FRONTEND_PORT}" != "${PORT}" ]]; then
+  echo "Frontend port ${PORT} busy → using ${FRONTEND_PORT}"
+fi
+if [[ "${ACTUAL_BACKEND_PORT}" != "${BACKEND_PORT}" ]]; then
+  echo "Backend port ${BACKEND_PORT} busy → using ${ACTUAL_BACKEND_PORT}"
+fi
+
+export BACKEND_URL="http://127.0.0.1:${ACTUAL_BACKEND_PORT}"
+export PORT="${FRONTEND_PORT}"
+
 echo "Installing backend dependencies..."
-pip3 install django djangorestframework django-cors-headers django-filter --quiet 2>/dev/null || true
+"${PYTHON_BIN}" -m pip install -r backend/requirements.txt --quiet
 
-# 运行后端迁移
-echo "Running backend migrations..."
+echo "Running migrations..."
 cd backend
-python3 manage.py migrate --run-syncdb 2>/dev/null || true
-python3 init_data.py 2>/dev/null || true
+"${PYTHON_BIN}" manage.py migrate --noinput
+"${PYTHON_BIN}" init_data.py || true
 cd "${COZE_WORKSPACE_PATH}"
 
-# 启动后端 Django 服务（后台运行）
-echo "Starting Django backend on port ${BACKEND_PORT}..."
+echo "Starting Django backend on port ${ACTUAL_BACKEND_PORT}..."
 cd backend
-python3 manage.py runserver 0.0.0.0:${BACKEND_PORT} &
+"${PYTHON_BIN}" manage.py runserver "0.0.0.0:${ACTUAL_BACKEND_PORT}" &
 BACKEND_PID=$!
 cd "${COZE_WORKSPACE_PATH}"
 
-# 等待后端启动
-sleep 3
+cleanup() {
+  kill "${BACKEND_PID}" 2>/dev/null || true
+}
+trap cleanup EXIT
 
-echo "Starting Next.js frontend on port ${DEPLOY_RUN_PORT} for dev..."
+sleep 2
+echo "Frontend → http://127.0.0.1:${FRONTEND_PORT}"
+echo "Backend  → ${BACKEND_URL}"
+echo "API proxy destination: ${BACKEND_URL}"
 
-# 启动前端服务
-PORT=${DEPLOY_RUN_PORT} pnpm tsx watch src/server.ts
+PORT="${FRONTEND_PORT}" BACKEND_URL="${BACKEND_URL}" pnpm tsx watch src/server.ts

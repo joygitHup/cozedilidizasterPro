@@ -75,11 +75,24 @@ class EvacuationTask(models.Model):
     # 安置点
     shelter_name = models.CharField('安置点名称', max_length=100, blank=True)
     shelter_address = models.CharField('安置点地址', max_length=200, blank=True)
+    shelter_longitude = models.DecimalField(
+        '安置点经度', max_digits=12, decimal_places=8, null=True, blank=True
+    )
+    shelter_latitude = models.DecimalField(
+        '安置点纬度', max_digits=12, decimal_places=8, null=True, blank=True
+    )
     
-    # 路线
+    # 路线：[[lng, lat], ...] GeoJSON LineString 坐标序
     route_path = models.JSONField('路线坐标', default=list, blank=True)
     route_distance = models.DecimalField('路线距离(km)', max_digits=10, decimal_places=2, default=0)
     estimated_time = models.IntegerField('预计时间(分钟)', default=0)
+    route_provider = models.CharField(
+        '路网来源',
+        max_length=20,
+        blank=True,
+        default='',
+        help_text='mapbox | osrm | interpolate',
+    )
     
     # 职责
     commander = models.CharField('指挥人', max_length=50, blank=True)

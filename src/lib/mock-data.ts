@@ -31,6 +31,7 @@ export async function getLatestWarnings(limit = 5): Promise<WarningRecord[]> {
   const warnings: WarningRecord[] = [
     {
       id: 'W202607301023',
+      dbId: 1,
       hazardPointId: 'HS001',
       hazardPointName: '竹林坡',
       level: 'red',
@@ -51,6 +52,7 @@ export async function getLatestWarnings(limit = 5): Promise<WarningRecord[]> {
     },
     {
       id: 'W202607300945',
+      dbId: 2,
       hazardPointId: 'HS002',
       hazardPointName: '石桥镇',
       level: 'orange',
@@ -71,6 +73,7 @@ export async function getLatestWarnings(limit = 5): Promise<WarningRecord[]> {
     },
     {
       id: 'W202607300812',
+      dbId: 3,
       hazardPointId: 'HS003',
       hazardPointName: '李家坪',
       level: 'yellow',
@@ -92,6 +95,7 @@ export async function getLatestWarnings(limit = 5): Promise<WarningRecord[]> {
     },
     {
       id: 'W202607300730',
+      dbId: 4,
       hazardPointId: 'HS004',
       hazardPointName: '王家坎',
       level: 'yellow',
@@ -107,6 +111,7 @@ export async function getLatestWarnings(limit = 5): Promise<WarningRecord[]> {
     },
     {
       id: 'W202607300650',
+      dbId: 5,
       hazardPointId: 'HS005',
       hazardPointName: '赵家崖',
       level: 'blue',
@@ -201,7 +206,7 @@ export async function getMonitoringDevices(): Promise<MonitoringDevice[]> {
   await delay(200);
   return [
     {
-      id: 'NPR-001', name: 'NPR-001', type: 'npr_anchor', status: 'online',
+      id: '1', code: 'NPR-001', name: 'NPR-001', type: 'npr_anchor', status: 'online',
       location: { lng: 104.0668, lat: 30.5728, address: '竹林坡' },
       installDate: '2025-06-01',
       specs: { range: '0-2000MPa', accuracy: '0.1% FS', power: 2 },
@@ -209,7 +214,7 @@ export async function getMonitoringDevices(): Promise<MonitoringDevice[]> {
       data: generateMockData('force', 'MPa', 24),
     },
     {
-      id: 'RAIN-001', name: 'RAIN-001', type: 'rainfall', status: 'online',
+      id: '2', code: 'RAIN-001', name: 'RAIN-001', type: 'rainfall', status: 'online',
       location: { lng: 104.0670, lat: 30.5730, address: '竹林坡' },
       installDate: '2025-06-01',
       specs: { range: '0-4mm/min', accuracy: '±0.1mm', power: 1 },
@@ -217,7 +222,7 @@ export async function getMonitoringDevices(): Promise<MonitoringDevice[]> {
       data: generateMockData('rainfall', 'mm', 24),
     },
     {
-      id: 'FIB-001', name: 'FIB-001', type: 'fiber_optic', status: 'online',
+      id: '3', code: 'FIB-001', name: 'FIB-001', type: 'fiber_optic', status: 'online',
       location: { lng: 104.1234, lat: 30.6234, address: '石桥崖' },
       installDate: '2025-07-15',
       specs: { range: '0-5000με', accuracy: '±1με', power: 3 },
@@ -225,7 +230,7 @@ export async function getMonitoringDevices(): Promise<MonitoringDevice[]> {
       data: generateMockData('strain', 'με', 24),
     },
     {
-      id: 'CAM-001', name: 'CAM-001', type: 'camera', status: 'online',
+      id: '4', code: 'CAM-001', name: 'CAM-001', type: 'camera', status: 'online',
       location: { lng: 104.0668, lat: 30.5728, address: '竹林坡' },
       installDate: '2025-06-01',
       specs: { range: '4K/30fps', accuracy: '-', power: 15 },
@@ -233,7 +238,7 @@ export async function getMonitoringDevices(): Promise<MonitoringDevice[]> {
       data: [],
     },
     {
-      id: 'NPR-002', name: 'NPR-002', type: 'npr_anchor', status: 'offline',
+      id: '5', code: 'NPR-002', name: 'NPR-002', type: 'npr_anchor', status: 'offline',
       location: { lng: 104.0890, lat: 30.5890, address: '李家坪' },
       installDate: '2025-08-01',
       specs: { range: '0-2000MPa', accuracy: '0.1% FS', power: 2 },
@@ -241,7 +246,7 @@ export async function getMonitoringDevices(): Promise<MonitoringDevice[]> {
       data: generateMockData('force', 'MPa', 24),
     },
     {
-      id: 'NPR-003', name: 'NPR-003', type: 'npr_anchor', status: 'fault',
+      id: '6', code: 'NPR-003', name: 'NPR-003', type: 'npr_anchor', status: 'fault',
       location: { lng: 104.1567, lat: 30.6012, address: '王家坎' },
       installDate: '2025-09-01',
       specs: { range: '0-2000MPa', accuracy: '0.1% FS', power: 2 },
@@ -255,40 +260,43 @@ export async function getEvacuationTasks(): Promise<EvacuationTask[]> {
   await delay(200);
   return [
     {
-      id: 'EV001', warningId: 'W202607301023', hazardPointId: 'HS001',
-      pointName: '竹林坡', pointLevel: '红色',
+      id: 'EV001', dbId: 1, warningId: 'W202607301023', warningDbId: 1, warningCode: 'W202607301023', warningLevel: 'red',
+      hazardPointId: 'HS001', hazardPointDbId: 1, pointName: '竹林坡', pointCode: 'HS001', pointLevel: '红色',
+      hazardLng: 104.0668, hazardLat: 30.5728,
       riskArea: '竹林村后山影响区', riskDesc: '滑坡体前缘500m范围',
-      totalPeople: 156, transferredPeople: 143,
+      totalPeople: 156, transferredPeople: 143, completionRate: 91.7,
       peopleList: [],
       commander: '张指挥', commanderPhone: '138xxxx0001',
       gridWorker: '李四', gridPhone: '139xxxx5678',
-      shelter: '村小学', shelterAddress: '竹林村小学操场',
+      shelter: '村小学', shelterAddress: '竹林村小学操场', shelterLng: 104.0852, shelterLat: 30.5841,
       route: { path: [[104.0668, 30.5728], [104.0680, 30.5740], [104.0700, 30.5750]], distance: 2.3, estimatedTime: 35 },
-      status: 'ongoing', createTime: '2026-07-30 10:30:00', updateTime: '2026-07-30 10:45:00',
+      status: 'ongoing', statusDisplay: '进行中', createTime: '2026-07-30 10:30:00', updateTime: '2026-07-30 10:45:00',
     },
     {
-      id: 'EV002', warningId: 'W202607300945', hazardPointId: 'HS002',
-      pointName: '石桥崖', pointLevel: '橙色',
+      id: 'EV002', dbId: 2, warningId: 'W202607300945', warningDbId: 2, warningCode: 'W202607300945', warningLevel: 'orange',
+      hazardPointId: 'HS002', hazardPointDbId: 2, pointName: '石桥崖', pointCode: 'HS002', pointLevel: '橙色',
+      hazardLng: 104.1234, hazardLat: 30.6234,
       riskArea: '石桥村崖壁下方', riskDesc: '崩塌影响区域',
-      totalPeople: 89, transferredPeople: 89,
+      totalPeople: 89, transferredPeople: 89, completionRate: 100,
       peopleList: [],
       commander: '王指挥', commanderPhone: '138xxxx0002',
       gridWorker: '赵六', gridPhone: '136xxxx3456',
-      shelter: '镇政府', shelterAddress: 'B镇人民政府',
+      shelter: '镇政府', shelterAddress: 'B镇人民政府', shelterLng: 104.1025, shelterLat: 30.5610,
       route: { path: [[104.1234, 30.6234], [104.1250, 30.6250], [104.1280, 30.6270]], distance: 4.1, estimatedTime: 55 },
-      status: 'completed', createTime: '2026-07-30 09:50:00', updateTime: '2026-07-30 10:45:00',
+      status: 'completed', statusDisplay: '已完成', createTime: '2026-07-30 09:50:00', updateTime: '2026-07-30 10:45:00',
     },
     {
-      id: 'EV003', warningId: 'W202607300812', hazardPointId: 'HS003',
-      pointName: '李家坪', pointLevel: '黄色',
+      id: 'EV003', dbId: 3, warningId: 'W202607300812', warningDbId: 3, warningCode: 'W202607300812', warningLevel: 'yellow',
+      hazardPointId: 'HS003', hazardPointDbId: 3, pointName: '李家坪', pointCode: 'HS003', pointLevel: '黄色',
+      hazardLng: 104.0890, hazardLat: 30.5890,
       riskArea: '李家坪沟口', riskDesc: '泥石流影响区',
-      totalPeople: 23, transferredPeople: 20,
+      totalPeople: 23, transferredPeople: 20, completionRate: 87.0,
       peopleList: [],
       commander: '李指挥', commanderPhone: '138xxxx0003',
       gridWorker: '孙七', gridPhone: '135xxxx7890',
-      shelter: '社区中心', shelterAddress: 'A镇社区活动中心',
+      shelter: '社区中心', shelterAddress: 'A镇社区活动中心', shelterLng: 104.0788, shelterLat: 30.5955,
       route: { path: [[104.0890, 30.5890], [104.0900, 30.5900]], distance: 1.5, estimatedTime: 20 },
-      status: 'ongoing', createTime: '2026-07-30 08:20:00', updateTime: '2026-07-30 09:00:00',
+      status: 'ongoing', statusDisplay: '进行中', createTime: '2026-07-30 08:20:00', updateTime: '2026-07-30 09:00:00',
     },
   ];
 }

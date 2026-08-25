@@ -112,6 +112,14 @@ coverage/
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Local runtime / DB (never push)
+.dev-ports
+backend/db.sqlite3
+backend/celerybeat-schedule*
+**/__pycache__/
+services/**/.venv/
+*.pyc
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -122,6 +130,9 @@ pids
 *.pid
 *.seed
 *.pid.lock
+# MQTT bridge spool (durable buffer)
+backups/
+services/mqtt_bridge/spool/
 # Diagnostic reports
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Cache

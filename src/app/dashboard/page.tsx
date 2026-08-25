@@ -1,6 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Radio,
@@ -10,6 +17,8 @@ import {
   TrendingUp,
   TrendingDown,
   ArrowRight,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -24,9 +33,11 @@ import {
   PieChart,
   Pie,
   Cell,
+  Legend,
 } from 'recharts';
-import type { DashboardStats, WarningRecord } from '@/types';
-import { getDashboardStats, getLatestWarnings } from '@/lib/mock-data';
+import type { DashboardStats } from '@/types';
+import { getDashboardStats } from '@/lib/services';
+import { cn } from '@/lib/utils';
 
 const WARNING_COLORS: Record<string, string> = {
   red: '#ef4444',
@@ -35,67 +46,147 @@ const WARNING_COLORS: Record<string, string> = {
   blue: '#3b82f6',
 };
 
-const WARNING_LABELS: Record<string, string> = {
-  red: '红色',
-  orange: '橙色',
-  yellow: '黄色',
-  blue: '蓝色',
-};
+/** 等容器有实际宽高后再挂载 Recharts，避免网格布局下 0×0 空白 */
+function ChartFrame({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
 
-const trendChartData = Array.from({ length: 24 }, (_, i) => ({
-  time: `${String(i).padStart(2, '0')}:00`,
-  牛顿力: Math.round(40 + Math.sin(i / 4) * 20 + Math.random() * 10),
-  降雨量: Math.round(5 + Math.sin(i / 3) * 15 + Math.random() * 8),
-  位移量: Math.round(8 + Math.sin(i / 5) * 5 + Math.random() * 3),
-}));
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) setReady(true);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-const hazardTypeData = [
-  { name: '滑坡', value: 684, color: '#ef4444' },
-  { name: '崩塌', value: 312, color: '#f97316' },
-  { name: '泥石流', value: 198, color: '#eab308' },
-  { name: '其他', value: 90, color: '#3b82f6' },
-];
-
-const monthlyData = [
-  { month: '1月', 预警数: 12, 处置数: 12 },
-  { month: '2月', 预警数: 8, 处置数: 8 },
-  { month: '3月', 预警数: 15, 处置数: 14 },
-  { month: '4月', 预警数: 22, 处置数: 21 },
-  { month: '5月', 预警数: 18, 处置数: 18 },
-  { month: '6月', 预警数: 35, 处置数: 33 },
-  { month: '7月', 预警数: 42, 处置数: 39 },
-];
+  return (
+    <div ref={ref} className={cn('relative w-full min-w-0', className)}>
+      {ready ? (
+        <ResponsiveContainer width="100%" height="100%">
+          {children as React.ReactElement}
+        </ResponsiveContainer>
+      ) : (
+        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+          图表加载中…
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [warnings, setWarnings] = useState<WarningRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    getDashboardStats().then(setStats);
-    getLatestWarnings(5).then(setWarnings);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setStats(await getDashboardStats());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加载失败');
+      setStats(null);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  if (!stats) return null;
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  if (loading && !stats) {
+    return (
+      <div className="flex items-center justify-center rounded-lg border border-border bg-card p-16 text-muted-foreground">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        正在加载驾驶舱数据…
+      </div>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <div className="space-y-3 rounded-lg border border-border bg-card p-8 text-center">
+        <p className="text-red-400">{error || '驾驶舱数据加载失败'}</p>
+        <button
+          type="button"
+          onClick={load}
+          className="inline-flex h-9 items-center gap-1 rounded-lg border border-border px-3 text-sm"
+        >
+          <RefreshCw className="h-3.5 w-3.5" /> 重试
+        </button>
+      </div>
+    );
+  }
+
+  const hazardTypeData = (stats.hazardTypeDistribution ?? []).map((d) => ({
+    ...d,
+    value: Number(d.value) || 0,
+  }));
+  const monthlyData = (stats.monthlyWarnings ?? []).map((m) => ({
+    month: m.label || `${m.month}月`,
+    warnings: Number(m.warnings) || 0,
+    closed: Number(m.closed) || 0,
+  }));
+  const monitorTrend = stats.monitorTrend ?? [];
+  const warnings = stats.latestWarnings ?? [];
+  const todos = stats.todoTasks ?? [];
+  const level = stats.warningByLevel;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">驾驶舱总览</h1>
-        <span className="text-sm text-muted-foreground">
-          数据更新时间：2026-07-30 10:23
-        </span>
+        <div>
+          <h1 className="text-2xl font-bold text-white">驾驶舱总览</h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            汇总隐患、监测、预警、巡查与转移全链路数据；业务变更后自动刷新。
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            数据更新时间：{stats.generatedAt || '—'}
+          </span>
+          <button
+            type="button"
+            onClick={load}
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-border px-2.5 text-xs"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+            刷新
+          </button>
+        </div>
       </div>
 
-      {/* 统计卡片 */}
-      <div className="grid grid-cols-5 gap-4">
+      {error && (
+        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <StatCard
           icon={AlertTriangle}
           label="隐患总数"
           value={stats.hazardTotal.toLocaleString()}
           trend={stats.hazardTrend}
-          trendLabel="较上月"
+          trendLabel="较上月新增"
           color="text-red-400"
           bgColor="bg-red-500/10"
+          href="/hazard/points"
+          isRate
         />
         <StatCard
           icon={Radio}
@@ -105,6 +196,7 @@ export default function DashboardPage() {
           trendLabel="在线率"
           color="text-cyan-400"
           bgColor="bg-cyan-500/10"
+          href="/monitoring/devices"
           isRate
         />
         <StatCard
@@ -115,16 +207,19 @@ export default function DashboardPage() {
           trendLabel="较昨日"
           color="text-orange-400"
           bgColor="bg-orange-500/10"
+          href="/warning/current"
         />
         <StatCard
           icon={ClipboardList}
           label="待处置"
           value={stats.pendingTasks.toString()}
           trend={stats.tasksTrend}
-          trendLabel="较昨日"
+          trendLabel="较昨日新增待办"
           color="text-yellow-400"
           bgColor="bg-yellow-500/10"
+          href="/inspection/dispatch"
           invertTrend
+          hint={`预警${stats.warnActionable ?? 0} · 巡查${stats.inspectOpen ?? 0} · 转移${stats.evacOpen ?? 0}`}
         />
         <StatCard
           icon={Users}
@@ -134,133 +229,237 @@ export default function DashboardPage() {
           trendLabel="较昨日"
           color="text-green-400"
           bgColor="bg-green-500/10"
+          href="/emergency/evacuation"
         />
       </div>
 
-      {/* 中间区域：图表 + 预警动态 */}
-      <div className="grid grid-cols-3 gap-4">
-        {/* 实时监测曲线 */}
-        <div className="col-span-2 rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-4 text-sm font-semibold text-white">实时监测曲线</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={trendChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis dataKey="time" stroke="#64748b" fontSize={11} interval={3} />
-              <YAxis stroke="#64748b" fontSize={11} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1e293b',
-                  border: '1px solid #334155',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                }}
-                labelStyle={{ color: '#f1f5f9' }}
-              />
-              <Area type="monotone" dataKey="牛顿力" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.1} strokeWidth={2} />
-              <Area type="monotone" dataKey="降雨量" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} strokeWidth={2} />
-              <Area type="monotone" dataKey="位移量" stroke="#f97316" fill="#f97316" fillOpacity={0.1} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-          <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-cyan-500" /> 牛顿力 (MPa)
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-blue-500" /> 降雨量 (mm)
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-orange-500" /> 位移量 (mm)
-            </span>
+      {level && (
+        <div className="grid grid-cols-4 gap-3">
+          {(['red', 'orange', 'yellow', 'blue'] as const).map((k) => (
+            <div
+              key={k}
+              className="rounded-lg border border-border bg-card px-3 py-2"
+            >
+              <p className="text-xs text-muted-foreground">
+                {k === 'red' ? '红色' : k === 'orange' ? '橙色' : k === 'yellow' ? '黄色' : '蓝色'}
+                未闭环
+              </p>
+              <p
+                className="font-mono text-xl font-bold"
+                style={{ color: WARNING_COLORS[k] }}
+              >
+                {level[k] ?? 0}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-lg border border-border bg-card p-4 lg:col-span-2">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-white">近 24 小时监测曲线</h3>
+            <Link href="/monitoring/realtime" className="text-xs text-cyan-400 hover:underline">
+              实时监测
+            </Link>
           </div>
+          {monitorTrend.every(
+            (p) => p.force === 0 && p.rainfall === 0 && p.displacement === 0
+          ) ? (
+            <p className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
+              近 24 小时暂无监测数据上报
+            </p>
+          ) : (
+            <ChartFrame className="h-[240px]">
+              <AreaChart data={monitorTrend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="time" stroke="#64748b" fontSize={11} interval={3} />
+                <YAxis stroke="#64748b" fontSize={11} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1e293b',
+                    border: '1px solid #334155',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                  }}
+                  labelStyle={{ color: '#f1f5f9' }}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Area
+                  type="monotone"
+                  dataKey="force"
+                  name="牛顿力"
+                  stroke="#06b6d4"
+                  fill="#06b6d4"
+                  fillOpacity={0.1}
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="rainfall"
+                  name="降雨量"
+                  stroke="#3b82f6"
+                  fill="#3b82f6"
+                  fillOpacity={0.1}
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="displacement"
+                  name="位移量"
+                  stroke="#f97316"
+                  fill="#f97316"
+                  fillOpacity={0.1}
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ChartFrame>
+          )}
         </div>
 
-        {/* 最新预警动态 */}
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-white">最新预警动态</h3>
-            <a href="/warning/current" className="flex items-center gap-1 text-xs text-cyan-400 hover:underline">
+            <Link
+              href="/warning/current"
+              className="flex items-center gap-1 text-xs text-cyan-400 hover:underline"
+            >
               查看全部 <ArrowRight className="h-3 w-3" />
-            </a>
+            </Link>
           </div>
-          <div className="space-y-3">
-            {warnings.map((w) => (
-              <div
-                key={w.id}
-                className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted"
-              >
-                <span
-                  className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: WARNING_COLORS[w.level] }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white">{w.hazardPointName}</span>
-                    <span
-                      className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                      style={{
-                        color: WARNING_COLORS[w.level],
-                        backgroundColor: `${WARNING_COLORS[w.level]}20`,
-                      }}
-                    >
-                      {WARNING_LABELS[w.level]}
-                    </span>
+          <div className="max-h-[260px] space-y-3 overflow-y-auto">
+            {warnings.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">暂无预警</p>
+            ) : (
+              warnings.map((w) => (
+                <div
+                  key={w.id}
+                  className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted"
+                >
+                  <span
+                    className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: WARNING_COLORS[w.level] || '#64748b' }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium text-white">
+                        {w.hazardPointName || w.code}
+                      </span>
+                      <span
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                        style={{
+                          color: WARNING_COLORS[w.level],
+                          backgroundColor: `${WARNING_COLORS[w.level]}20`,
+                        }}
+                      >
+                        {w.levelDisplay}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {w.triggerType || '—'} · {w.statusDisplay} · 置信度 {w.confidence}%
+                    </p>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground truncate">
-                    {w.triggerType} · 置信度 {w.confidence}%
-                  </p>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {w.createTime.split(' ')[1]?.slice(0, 5)}
+                  </span>
                 </div>
-                <span className="text-xs text-muted-foreground shrink-0">
-                  {w.createTime.split(' ')[1]?.slice(0, 5)}
-                </span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>
 
-      {/* 底部区域：图表 */}
-      <div className="grid grid-cols-3 gap-4">
-        {/* 隐患类型分布 */}
-        <div className="rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-4 text-sm font-semibold text-white">隐患类型分布</h3>
-          <div className="flex items-center gap-4">
-            <ResponsiveContainer width={140} height={140}>
-              <PieChart>
-                <Pie
-                  data={hazardTypeData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={40}
-                  outerRadius={65}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {hazardTypeData.map((entry, index) => (
-                    <Cell key={index} fill={entry.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-2">
-              {hazardTypeData.map((item) => (
-                <div key={item.name} className="flex items-center gap-2 text-xs">
-                  <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: item.color }} />
-                  <span className="text-muted-foreground">{item.name}</span>
-                  <span className="font-mono font-medium text-white">{item.value}</span>
-                </div>
-              ))}
-            </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="min-w-0 rounded-lg border border-border bg-card p-4">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-white">隐患类型分布</h3>
+            <Link href="/statistics/disaster" className="text-xs text-cyan-400 hover:underline">
+              灾害统计
+            </Link>
           </div>
+          {hazardTypeData.length === 0 ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">暂无隐患点</p>
+          ) : (
+            <div className="flex h-[200px] min-w-0 items-center gap-3">
+              <ChartFrame className="h-[180px] w-[180px] shrink-0">
+                <PieChart>
+                  <Pie
+                    data={hazardTypeData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={48}
+                    outerRadius={72}
+                    paddingAngle={3}
+                    dataKey="value"
+                    nameKey="name"
+                    isAnimationActive={false}
+                  >
+                    {hazardTypeData.map((entry, index) => (
+                      <Cell key={`${entry.key}-${index}`} fill={entry.color || '#64748b'} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1e293b',
+                      border: '1px solid #334155',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                    }}
+                  />
+                </PieChart>
+              </ChartFrame>
+              <div className="min-w-0 flex-1 space-y-2.5">
+                {hazardTypeData.map((item) => {
+                  const total = hazardTypeData.reduce((s, x) => s + x.value, 0) || 1;
+                  const pct = Math.round((item.value / total) * 100);
+                  return (
+                    <div key={item.key || item.name}>
+                      <div className="mb-1 flex items-center gap-2 text-xs">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        <span className="truncate text-muted-foreground">{item.name}</span>
+                        <span className="ml-auto font-mono text-white">
+                          {item.value}
+                          <span className="ml-1 text-muted-foreground">({pct}%)</span>
+                        </span>
+                      </div>
+                      <div className="h-1 overflow-hidden rounded bg-muted">
+                        <div
+                          className="h-full rounded"
+                          style={{ width: `${pct}%`, backgroundColor: item.color }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* 月度预警趋势 */}
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="min-w-0 rounded-lg border border-border bg-card p-4">
           <h3 className="mb-4 text-sm font-semibold text-white">月度预警趋势</h3>
-          <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={monthlyData}>
+          <ChartFrame className="h-[200px]">
+            <BarChart data={monthlyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis dataKey="month" stroke="#64748b" fontSize={11} />
-              <YAxis stroke="#64748b" fontSize={11} />
+              <XAxis
+                dataKey="month"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+                width={28}
+              />
               <Tooltip
                 contentStyle={{
                   backgroundColor: '#1e293b',
@@ -269,31 +468,56 @@ export default function DashboardPage() {
                   fontSize: '12px',
                 }}
               />
-              <Bar dataKey="预警数" fill="#f97316" radius={[2, 2, 0, 0]} />
-              <Bar dataKey="处置数" fill="#22c55e" radius={[2, 2, 0, 0]} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar
+                dataKey="warnings"
+                name="预警数"
+                fill="#f97316"
+                radius={[2, 2, 0, 0]}
+                isAnimationActive={false}
+              />
+              <Bar
+                dataKey="closed"
+                name="处置数"
+                fill="#22c55e"
+                radius={[2, 2, 0, 0]}
+                isAnimationActive={false}
+              />
             </BarChart>
-          </ResponsiveContainer>
+          </ChartFrame>
         </div>
 
-        {/* 待办任务 */}
         <div className="rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-4 text-sm font-semibold text-white">待办任务</h3>
-          <div className="space-y-3">
-            {[
-              { label: '竹林坡巡查任务', time: '10:00', type: '巡查' },
-              { label: '石桥镇预警核实', time: '14:00', type: '核实' },
-              { label: '李家坪转移确认', time: '15:00', type: '转移' },
-              { label: '设备NPR-002维修', time: '16:00', type: '维修' },
-              { label: '月度报告提交', time: '18:00', type: '报告' },
-            ].map((task, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-lg bg-muted/50 p-2.5">
-                <input type="checkbox" className="h-4 w-4 rounded border-border accent-cyan-500" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white truncate">{task.label}</p>
-                  <p className="text-xs text-muted-foreground">{task.time} · {task.type}</p>
-                </div>
-              </div>
-            ))}
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-white">待办任务</h3>
+            <span className="text-xs text-muted-foreground">{todos.length} 项</span>
+          </div>
+          <div className="max-h-[200px] space-y-2.5 overflow-y-auto">
+            {todos.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">暂无待办</p>
+            ) : (
+              todos.map((task) => (
+                <Link
+                  key={task.id}
+                  href={task.href}
+                  className="flex items-center gap-3 rounded-lg bg-muted/50 p-2.5 transition-colors hover:bg-muted"
+                >
+                  <span
+                    className={cn(
+                      'h-2 w-2 shrink-0 rounded-full',
+                      task.priority === 'high' ? 'bg-red-400' : 'bg-cyan-400'
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-white">{task.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {task.time} · {task.type}
+                    </p>
+                  </div>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                </Link>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -311,6 +535,8 @@ function StatCard({
   bgColor,
   invertTrend,
   isRate,
+  href,
+  hint,
 }: {
   icon: React.ElementType;
   label: string;
@@ -321,26 +547,32 @@ function StatCard({
   bgColor: string;
   invertTrend?: boolean;
   isRate?: boolean;
+  href: string;
+  hint?: string;
 }) {
   const isPositive = trend > 0;
   const isGood = invertTrend ? !isPositive : isPositive;
   const TrendIcon = isPositive ? TrendingUp : TrendingDown;
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <Link
+      href={href}
+      className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-cyan-500/40"
+    >
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">{label}</span>
         <div className={`rounded-lg p-1.5 ${bgColor}`}>
           <Icon className={`h-4 w-4 ${color}`} />
         </div>
       </div>
-      <p className={`mt-2 text-2xl font-bold font-mono ${color}`}>{value}</p>
+      <p className={`mt-2 font-mono text-2xl font-bold ${color}`}>{value}</p>
       <div className="mt-1 flex items-center gap-1">
         <TrendIcon className={`h-3 w-3 ${isGood ? 'text-green-400' : 'text-red-400'}`} />
         <span className={`text-xs ${isGood ? 'text-green-400' : 'text-red-400'}`}>
           {isRate ? `${trend}%` : `${isPositive ? '+' : ''}${trend}`} {trendLabel}
         </span>
       </div>
-    </div>
+      {hint && <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p>}
+    </Link>
   );
 }

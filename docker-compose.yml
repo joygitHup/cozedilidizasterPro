@@ -1,0 +1,83 @@
+# 基础设施：可选 Postgres/Redis + InfluxDB 时序
+# 本机已有 Postgres（如 forest_postgres）时只起 influxdb：
+#   docker compose up -d influxdb
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: geohazard-postgres
+    profiles: ["full"]
+    environment:
+      POSTGRES_DB: ${DB_NAME:-geohazard}
+      POSTGRES_USER: ${DB_USER:-geohazard_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-geohazard_pass}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - geohazard_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-geohazard_user} -d ${DB_NAME:-geohazard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: geohazard-redis
+    profiles: ["full"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - geohazard_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: geohazard-influxdb
+    ports:
+      - "${INFLUXDB_PORT:-8086}:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USER:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-geohazard_influx}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-geohazard}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-monitor}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-geohazard-influx-dev-token}
+      DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUXDB_RETENTION:-365d}
+    volumes:
+      - geohazard_influx:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # 可选：本机已有 MinIO(:9000) 时可不启；冲突则改 MINIO_API_PORT=9100
+  minio:
+    image: minio/minio:latest
+    container_name: geohazard-minio
+    profiles: ["minio"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-geohazard}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-geohazard123}
+    ports:
+      - "${MINIO_API_PORT:-9100}:9000"
+      - "${MINIO_CONSOLE_PORT:-9101}:9001"
+    volumes:
+      - geohazard_minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  geohazard_pgdata:
+  geohazard_redis:
+  geohazard_influx:
+  geohazard_minio:

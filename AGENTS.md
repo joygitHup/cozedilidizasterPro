@@ -87,15 +87,42 @@
 
 ## 运行与预览
 
-### 开发模式
+### 开发模式（单体）
 ```bash
-# 启动脚本会同时启动前后端
+# Windows
+pwsh scripts/dev.ps1
+# 或
 bash scripts/dev.sh
 ```
 
 - 前端: http://localhost:5000
 - 后端: http://localhost:8000
-- API 代理: 前端 /api/* 请求自动代理到后端
+- API 代理: 前端 `/api/*` → Django
+
+### 微服务模式（绞杀式拆分）
+按域拆进程，统一经 API Gateway 入口：
+
+| 服务 | 端口 | 实现 |
+|------|------|------|
+| Gateway | 8088 | `services/gateway` FastAPI 路由/限流 |
+| Core | 8000 | Django `config.urls_core`（用户/隐患/应急/生态/驾驶舱） |
+| Monitor | 8001 | **FastAPI + SQLAlchemy**（`services/monitor`，不共用 Django ORM） |
+| Warning | 8002 | **FastAPI + SQLAlchemy**（`services/warning`，规则引擎自包含） |
+| Video / Storage | 8600 / 8700 | sidecar |
+
+默认仍共享同一 Postgres（可用 `MONITOR_DATABASE_URL` / `WARNING_DATABASE_URL` 拆库）。
+内部调用：`Monitor → Warning /internal/evaluate`（`X-Internal-Token`）。
+
+```powershell
+# 方式一：dev 脚本
+$env:USE_MICROSERVICES=1; pwsh scripts/dev.ps1
+
+# 方式二：仅后端微服务
+pwsh scripts/start-microservices.ps1
+# 停止：pwsh scripts/stop-microservices.ps1
+```
+
+前端 `BACKEND_URL=http://127.0.0.1:8088`。
 
 ### 生产部署
 ```bash

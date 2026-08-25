@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -10,16 +10,18 @@ import {
   Siren,
   TreePine,
   Package,
-  Box,
   ClipboardList,
   BarChart3,
   Settings,
   Mountain,
   ChevronDown,
   ChevronRight,
+  Box,
+  MonitorPlay,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { canViewPath, fetchMyPermissions } from '@/lib/permissions';
 
 interface MenuItem {
   label: string;
@@ -30,6 +32,7 @@ interface MenuItem {
 
 const menuItems: MenuItem[] = [
   { label: '驾驶舱总览', icon: LayoutDashboard, href: '/dashboard' },
+  { label: '指挥大屏', icon: MonitorPlay, href: '/screen' },
   {
     label: '隐患台账管理',
     icon: AlertTriangle,
@@ -88,6 +91,7 @@ const menuItems: MenuItem[] = [
     icon: Box,
     children: [
       { label: '模型管理', href: '/geology/models' },
+      { label: '三维场景', href: '/geology/viewer' },
       { label: '剖面分析', href: '/geology/cross-section' },
     ],
   },
@@ -119,6 +123,7 @@ const menuItems: MenuItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [permReady, setPermReady] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     menuItems.forEach((item) => {
@@ -128,6 +133,25 @@ export function Sidebar() {
     });
     return initial;
   });
+
+  useEffect(() => {
+    void fetchMyPermissions()
+      .catch(() => null)
+      .finally(() => setPermReady(true));
+  }, []);
+
+  const visibleMenus = useMemo(() => {
+    return menuItems
+      .map((item) => {
+        if (item.href) {
+          return canViewPath(item.href) ? item : null;
+        }
+        const children = (item.children || []).filter((c) => canViewPath(c.href));
+        if (!children.length) return null;
+        return { ...item, children };
+      })
+      .filter(Boolean) as MenuItem[];
+  }, [permReady, pathname]);
 
   const toggleMenu = (label: string) => {
     setExpandedMenus((prev) => {
@@ -149,7 +173,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto scrollbar-thin py-2">
-        {menuItems.map((item) => {
+        {visibleMenus.map((item) => {
           const Icon = item.icon;
           const isExpanded = expandedMenus.has(item.label);
           const isActive = item.href
@@ -198,14 +222,34 @@ export function Sidebar() {
             );
           }
 
+          const href = item.href!;
+          if (href === '/screen') {
+            return (
+              <a
+                key={item.label}
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className={cn(
+                  'flex items-center gap-3 px-4 py-2.5 text-sm transition-colors',
+                  isActive
+                    ? 'text-cyan-400 bg-sidebar-accent'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-white'
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{item.label}</span>
+              </a>
+            );
+          }
           return (
             <Link
               key={item.label}
-              href={item.href!}
+              href={href}
               className={cn(
                 'flex items-center gap-3 px-4 py-2.5 text-sm transition-colors',
-                pathname === item.href
-                  ? 'text-cyan-400 bg-sidebar-accent font-medium'
+                isActive
+                  ? 'text-cyan-400 bg-sidebar-accent'
                   : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-white'
               )}
             >
@@ -215,18 +259,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      <div className="border-t border-sidebar-border p-3">
-        <div className="flex items-center gap-2 rounded-lg bg-sidebar-accent px-3 py-2">
-          <div className="h-7 w-7 rounded-full bg-cyan-500/20 flex items-center justify-center">
-            <span className="text-xs font-bold text-cyan-400">管</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-white truncate">管理员</p>
-            <p className="text-[10px] text-slate-400">值班领导</p>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }
