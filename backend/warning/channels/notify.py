@@ -109,18 +109,27 @@ def _send_sms(phone: str, content: str) -> TargetResult:
         })
         return TargetResult(target=phone, phone=phone, channel='sms', ok=ok, detail=detail, provider='aliyun')
 
-    # 控制台通道：开发环境可验通路；生产可设 SMS_PROVIDER=required 强制失败
-    if provider == 'required':
+    # 未配置真实网关：默认计为失败（避免值班误判「已叫应」）
+    if provider == 'required' or provider in ('auto', 'webhook', 'aliyun', 'console', ''):
+        logger.info('[SMS-CONSOLE] to=%s content=%s', phone, content[:120])
+        allow_console = (os.getenv('NOTIFY_ALLOW_CONSOLE') or '').lower() in (
+            '1', 'true', 'yes',
+        )
+        if allow_console:
+            return TargetResult(
+                target=phone, phone=phone, channel='sms', ok=True,
+                detail='NOTIFY_ALLOW_CONSOLE：仅写日志，未真正发短信',
+                provider='console',
+            )
         return TargetResult(
             target=phone, phone=phone, channel='sms', ok=False,
-            detail='未配置 SMS_WEBHOOK_URL / 阿里云短信网关',
-            provider='none',
+            detail='未配置 SMS_WEBHOOK_URL / 阿里云短信网关（已记日志，计为失败）',
+            provider='console',
         )
-    logger.info('[SMS-CONSOLE] to=%s content=%s', phone, content[:120])
     return TargetResult(
-        target=phone, phone=phone, channel='sms', ok=True,
-        detail='已写入服务日志（未配置外呼网关时的开发通道）',
-        provider='console',
+        target=phone, phone=phone, channel='sms', ok=False,
+        detail=f'未知 SMS_PROVIDER={provider}',
+        provider='none',
     )
 
 
@@ -136,16 +145,19 @@ def _send_voice(phone: str, content: str) -> TargetResult:
         })
         return TargetResult(target=phone, phone=phone, channel='voice', ok=ok, detail=detail, provider='webhook')
 
-    if provider == 'required':
-        return TargetResult(
-            target=phone, phone=phone, channel='voice', ok=False,
-            detail='未配置 VOICE_WEBHOOK_URL',
-            provider='none',
-        )
     logger.info('[VOICE-CONSOLE] to=%s content=%s', phone, content[:120])
+    allow_console = (os.getenv('NOTIFY_ALLOW_CONSOLE') or '').lower() in (
+        '1', 'true', 'yes',
+    )
+    if allow_console:
+        return TargetResult(
+            target=phone, phone=phone, channel='voice', ok=True,
+            detail='NOTIFY_ALLOW_CONSOLE：仅写日志，未真正外呼',
+            provider='console',
+        )
     return TargetResult(
-        target=phone, phone=phone, channel='voice', ok=True,
-        detail='已写入服务日志（未配置语音网关时的开发通道）',
+        target=phone, phone=phone, channel='voice', ok=False,
+        detail='未配置 VOICE_WEBHOOK_URL（已记日志，计为失败）',
         provider='console',
     )
 

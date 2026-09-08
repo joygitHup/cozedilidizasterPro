@@ -22,8 +22,9 @@ $DbPass = if ($env:DB_PASSWORD) { $env:DB_PASSWORD } else { 'forest_pass' }
 $DbHost = if ($env:DB_HOST) { $env:DB_HOST } else { '127.0.0.1' }
 $DbPort = if ($env:DB_PORT) { $env:DB_PORT } else { '5432' }
 $Tsdb = if ($env:TSDB_BACKEND) { $env:TSDB_BACKEND.ToLower() } else { 'postgres' }
-$Seed = $true
+$Seed = $false
 $SyncTsdb = $args -contains '-SyncTsdb'
+if ($args -contains '-Seed') { $Seed = $true }
 if ($args -contains '-NoSeed') { $Seed = $false }
 
 Write-Host "== Postgres: ensure database '$DbName' ==" -ForegroundColor Cyan

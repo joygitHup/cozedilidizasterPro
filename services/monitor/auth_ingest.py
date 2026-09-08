@@ -4,6 +4,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import logging
+import os
 from typing import Iterable
 
 from fastapi import Request
@@ -79,12 +80,19 @@ def _rate_limited(ip: str, token_fp: str) -> bool:
 
 def authorize_ingest(request: Request) -> tuple[bool, str, int]:
     tokens = mqtt_ingest_tokens()
+    allow_bypass = os.getenv("MQTT_INGEST_ALLOW_DEBUG_BYPASS", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     if not tokens:
-        if debug():
-            logger.warning("MQTT ingest token 未配置，DEBUG 下临时放行（不安全）")
+        if debug() and allow_bypass:
+            logger.warning(
+                "MQTT ingest token 未配置，已按 MQTT_INGEST_ALLOW_DEBUG_BYPASS 临时放行（勿用于现场）"
+            )
             return True, "", 200
-        return False, "服务未配置 ingest token", 503
+        return False, "服务未配置 ingest token（请设置 MQTT_INGEST_TOKEN）", 503
 
     if not debug() and any(t == DEFAULT_DEV_TOKEN for t in tokens):
         return False, "生产环境拒绝默认 ingest token，请更换 MQTT_INGEST_TOKEN", 503

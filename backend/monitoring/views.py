@@ -398,9 +398,20 @@ class MonitorDataViewSet(viewsets.ModelViewSet):
     ordering_fields = ['record_time', 'value', 'created_at']
 
     def get_permissions(self):
+        # 入库走 ingest token（见 create）；查询需登录
         if self.action in ('create',):
+            from rest_framework.permissions import AllowAny
+
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    def create(self, request, *args, **kwargs):
+        from monitoring.iot.auth import authorize_ingest
+
+        ok, detail, code = authorize_ingest(request)
+        if not ok:
+            return Response({'detail': detail}, status=code)
+        return super().create(request, *args, **kwargs)
 
     def get_serializer_class(self):
         if self.action == 'create':

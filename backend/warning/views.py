@@ -397,7 +397,11 @@ class WarningRecordViewSet(viewsets.ModelViewSet):
                     base['results'].append(r)
             return base
 
-        warning.call_status = dispatch.status if dispatch.status != 'partial' else 'success'
+        warning.call_status = {
+            'success': 'success',
+            'partial': 'partial',
+            'failed': 'failed',
+        }.get(dispatch.status, dispatch.status)
         if dispatch.status == 'failed':
             warning.call_status = 'failed'
         warning.call_detail = {

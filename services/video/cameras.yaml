@@ -1,13 +1,20 @@
-# 视频通道配置（与 MediaMTX path / ffmpeg 推流名对应）
+# 视频通道 = 实施配置（非业务台账）
+# - 本文件仅描述 MediaMTX / RTSP 推流路径，供视频 sidecar 读取
+# - 业务设备请在「监测感知 → 设备管理」维护；可用 device_code 与监测设备编号关联展示
+# - 现场清空演示通道：cameras: [] ；推流就绪后再按需添加
+#
 # 推流示例:
 #   ffmpeg -re -stream_loop -1 -i xxx.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/cam1
 
-cameras:
-  - id: cam1
-    code: CAM-V001
-    name: XX监测点主监控
-    location: XX县XX村
-    rtsp_path: cam1
-    device_code: "1234567890"
-    enabled: true
-    description: RTSP 推流至 MediaMTX
+cameras: []
+
+# 示例（取消注释并填写）:
+# cameras:
+#   - id: cam1
+#     code: CAM-V001
+#     name: XX监测点主监控
+#     location: XX县XX村
+#     rtsp_path: cam1
+#     device_code: DEV-CAM-001   # 对应监测设备 code，可选
+#     enabled: true
+#     description: RTSP 推流至 MediaMTX

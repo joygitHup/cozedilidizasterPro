@@ -5,10 +5,14 @@ import { useRouter } from 'next/navigation';
 import { Shield } from 'lucide-react';
 import { login } from '@/lib/services';
 
+const showDemoHint =
+  process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === '1' ||
+  process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === 'true';
+
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -53,6 +57,7 @@ export default function LoginPage() {
               onChange={(e) => setUsername(e.target.value)}
               className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-1 focus:ring-cyan-500"
               autoComplete="username"
+              required
             />
           </div>
           <div>
@@ -63,6 +68,7 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-1 focus:ring-cyan-500"
               autoComplete="current-password"
+              required
             />
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
@@ -75,9 +81,11 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          测试账号 admin / admin123
-        </p>
+        {showDemoHint && (
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            开发提示：admin / admin123（生产请关闭 NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS）
+          </p>
+        )}
       </form>
     </div>
   );

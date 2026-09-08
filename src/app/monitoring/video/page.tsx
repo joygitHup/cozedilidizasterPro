@@ -258,8 +258,13 @@ export default function VideoPage() {
           </div>
 
           {cameras.length === 0 && !error && (
-            <div className="rounded-lg border border-border bg-card py-16 text-center text-sm text-muted-foreground">
-              暂无配置摄像头，请编辑 services/video/cameras.yaml
+            <div className="space-y-2 rounded-lg border border-border bg-card py-16 text-center text-sm text-muted-foreground">
+              <p>暂无视频通道。</p>
+              <p className="mx-auto max-w-md text-xs leading-relaxed">
+                视频列表来自实施配置 <code className="text-cyan-400">services/video/cameras.yaml</code>
+                （非设备台账）。请在该文件添加摄像头后重启视频服务；可用{' '}
+                <code className="text-cyan-400">device_code</code> 关联「设备管理」中的设备编号。
+              </p>
             </div>
           )}
 

@@ -20,6 +20,9 @@ pnpm tsup src/server.ts --format cjs --platform node --target node20 --outDir di
 echo "Running backend migrations..."
 cd backend
 python3 manage.py migrate --run-syncdb 2>/dev/null || true
-python3 init_data.py 2>/dev/null || true
+# 构建阶段默认不灌演示数据；需要时 SEED_DEMO_DATA=1
+if [[ "${SEED_DEMO_DATA:-}" == "1" || "${SEED_DEMO_DATA:-}" == "true" ]]; then
+  python3 init_data.py 2>/dev/null || true
+fi
 
 echo "Build completed successfully!"

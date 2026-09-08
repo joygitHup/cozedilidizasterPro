@@ -43,7 +43,13 @@ echo "Installing backend dependencies..."
 echo "Running migrations..."
 cd backend
 "${PYTHON_BIN}" manage.py migrate --noinput
-"${PYTHON_BIN}" init_data.py || true
+# 默认不灌演示数据；需要时：SEED_DEMO_DATA=1
+if [[ "${SEED_DEMO_DATA:-}" == "1" || "${SEED_DEMO_DATA:-}" == "true" ]]; then
+  echo "SEED_DEMO_DATA=1 → running init_data.py"
+  "${PYTHON_BIN}" init_data.py || true
+else
+  echo "Skip init_data.py (set SEED_DEMO_DATA=1 to seed demos)"
+fi
 cd "${COZE_WORKSPACE_PATH}"
 
 echo "Starting Django backend on port ${ACTUAL_BACKEND_PORT}..."

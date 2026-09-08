@@ -285,6 +285,10 @@ GATEWAY_AUDIT_SKIP_PREFIXES = [
 MQTT_INGEST_TOKEN = os.getenv('MQTT_INGEST_TOKEN', 'dev-mqtt-ingest-token')
 # 支持多 Token 轮换：逗号分隔（优先于单 Token 合并去重）
 MQTT_INGEST_TOKENS = os.getenv('MQTT_INGEST_TOKENS', '')
+# 仅 DEBUG：无 Token 时是否放行（默认否；本地桥接联调可 true）
+MQTT_INGEST_ALLOW_DEBUG_BYPASS = (
+    os.getenv('MQTT_INGEST_ALLOW_DEBUG_BYPASS', 'false').lower() in ('1', 'true', 'yes')
+)
 # 可选来源 IP/CIDR 白名单，逗号分隔；空=不限制（生产建议限制到 bridge 主机）
 MQTT_INGEST_ALLOW_IPS = os.getenv('MQTT_INGEST_ALLOW_IPS', '')
 MQTT_INGEST_TRUST_X_FORWARDED = os.getenv('MQTT_INGEST_TRUST_X_FORWARDED', 'false').lower() == 'true'

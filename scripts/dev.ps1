@@ -48,7 +48,13 @@ if ($env:TSDB_BACKEND -and $env:TSDB_BACKEND.ToLower() -in @('influxdb','influx'
   $env:DJANGO_SETTINGS_MODULE = 'config.settings'
   python -c "import django; django.setup(); from monitoring import tsdb; tsdb.ensure_schema(); print('TSDB OK', tsdb.tsdb_backend())"
 }
-python init_data.py
+# 默认不灌演示数据；需要演示库时： $env:SEED_DEMO_DATA='1'
+if ($env:SEED_DEMO_DATA -eq '1' -or $env:SEED_DEMO_DATA -eq 'true') {
+  Write-Host "SEED_DEMO_DATA=1 → running init_data.py" -ForegroundColor Yellow
+  python init_data.py
+} else {
+  Write-Host "Skip init_data.py (set SEED_DEMO_DATA=1 to seed demos)" -ForegroundColor DarkGray
+}
 Pop-Location
 
 $procs = @()
